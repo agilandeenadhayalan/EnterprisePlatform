@@ -1,17 +1,46 @@
 # ==============================================
 # Smart Mobility & Analytics Platform
-# Phase 1: Core Infrastructure
+# Phase 1: Core Infrastructure + 16 Microservices
 # ==============================================
 #
 # Usage:
-#   docker-compose up -d          # Start Phase 1 infrastructure
-#   docker-compose logs -f        # Follow all logs
-#   docker-compose down -v        # Stop and remove volumes
+#   docker-compose up -d                    # Start everything
+#   docker-compose up -d postgres redis     # Infrastructure only
+#   docker-compose logs -f auth-service     # Follow one service
+#   docker-compose down -v                  # Stop and remove volumes
+#
+# Architecture:
+#   Client -> api-gateway (:8000) -> 13 Python services (:8010-8031)
+#                                 -> graphql-gateway (:8001)
+#                                 -> bff-service (:8002)
 #
 # Phase 2+: Layer additional services with override files:
 #   docker-compose -f docker-compose.yml -f docker-compose.phase2.yml up -d
 #
 # ==============================================
+
+# ── Shared config anchor (YAML anchor for DRY) ──
+x-python-service: &python-service
+  restart: unless-stopped
+  environment: &python-env
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: 5432
+    POSTGRES_DB: mobility_platform
+    POSTGRES_USER: mobility
+    POSTGRES_PASSWORD: mobility_dev_2024
+    REDIS_HOST: redis
+    REDIS_PORT: 6379
+    JWT_SECRET_KEY: dev-secret-key-change-in-production
+    JWT_ALGORITHM: HS256
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  deploy:
+    resources:
+      limits:
+        memory: 256M
 
 services:
   # ── PostgreSQL 16 ──
@@ -94,6 +123,300 @@ services:
       resources:
         limits:
           memory: 512M
+
+  # ══════════════════════════════════════════════
+  # Phase 1 Microservices (16 total)
+  # ══════════════════════════════════════════════
+
+  # ── Identity Domain (6 services) ──
+
+  auth-service:
+    <<: *python-service
+    build:
+      context: .
+      dockerfile: services/auth-service/Dockerfile
+    container_name: mobility-auth
+    ports:
+      - "8010:8010"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  session-service:
+    <<: *python-service
+    build:
+      context: .
+      dockerfile: services/session-service/Dockerfile
+    container_name: mobility-session
+    ports:
+      - "8011:8011"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8011/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  otp-service:
+    <<: *python-service
+    build:
+      context: .
+      dockerfile: services/otp-service/Dockerfile
+    container_name: mobility-otp
+    ports:
+      - "8012:8012"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8012/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  access-control-service:
+    <<: *python-service
+    build:
+      context: .
+      dockerfile: services/access-control-service/Dockerfile
+    container_name: mobility-access-control
+    ports:
+      - "8013:8013"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8013/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  device-service:
+    <<: *python-service
+    build:
+      context: .
+      dockerfile: services/device-service/Dockerfile
+    container_name: mobility-device
+    ports:
+      - "8014:8014"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8014/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  sso-service:
+    <<: *python-service
+    build:
+      context: .
+      dockerfile: services/sso-service/Dockerfile
+    container_name: mobility-sso
+    ports:
+      - "8015:8015"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8015/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── User Domain (5 services) ──
+
+  user-service:
+    <<: *python-service
+    build:
+      context: .
+      dockerfile: services/user-service/Dockerfile
+    container_name: mobility-user
+    ports:
+      - "8020:8020"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8020/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  profile-service:
+    <<: *python-service
+    build:
+      context: .
+      dockerfile: services/profile-service/Dockerfile
+    container_name: mobility-profile
+    ports:
+      - "8021:8021"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8021/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  address-service:
+    <<: *python-service
+    build:
+      context: .
+      dockerfile: services/address-service/Dockerfile
+    container_name: mobility-address
+    ports:
+      - "8022:8022"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8022/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  activity-service:
+    <<: *python-service
+    build:
+      context: .
+      dockerfile: services/activity-service/Dockerfile
+    container_name: mobility-activity
+    ports:
+      - "8023:8023"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8023/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  preferences-service:
+    <<: *python-service
+    build:
+      context: .
+      dockerfile: services/preferences-service/Dockerfile
+    container_name: mobility-preferences
+    ports:
+      - "8024:8024"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8024/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Config Domain (2 services) ──
+
+  config-service:
+    <<: *python-service
+    build:
+      context: .
+      dockerfile: services/config-service/Dockerfile
+    container_name: mobility-config
+    ports:
+      - "8030:8030"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8030/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  feature-flag-service:
+    <<: *python-service
+    build:
+      context: .
+      dockerfile: services/feature-flag-service/Dockerfile
+    container_name: mobility-feature-flags
+    ports:
+      - "8031:8031"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8031/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Gateway Domain (3 TypeScript services) ──
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    container_name: mobility-api-gateway
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      PORT: 8000
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: dev-secret-key-change-in-production
+      AUTH_SERVICE_URL: http://auth-service:8010
+      SESSION_SERVICE_URL: http://session-service:8011
+      OTP_SERVICE_URL: http://otp-service:8012
+      ACCESS_CONTROL_SERVICE_URL: http://access-control-service:8013
+      DEVICE_SERVICE_URL: http://device-service:8014
+      SSO_SERVICE_URL: http://sso-service:8015
+      USER_SERVICE_URL: http://user-service:8020
+      PROFILE_SERVICE_URL: http://profile-service:8021
+      ADDRESS_SERVICE_URL: http://address-service:8022
+      ACTIVITY_SERVICE_URL: http://activity-service:8023
+      PREFERENCES_SERVICE_URL: http://preferences-service:8024
+      CONFIG_SERVICE_URL: http://config-service:8030
+      FEATURE_FLAG_SERVICE_URL: http://feature-flag-service:8031
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:8000/health', r => r.statusCode === 200 ? process.exit(0) : process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  graphql-gateway:
+    build:
+      context: .
+      dockerfile: services/graphql-gateway/Dockerfile
+    container_name: mobility-graphql
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      PORT: 8001
+      AUTH_SERVICE_URL: http://auth-service:8010
+      USER_SERVICE_URL: http://user-service:8020
+      PROFILE_SERVICE_URL: http://profile-service:8021
+      ADDRESS_SERVICE_URL: http://address-service:8022
+      ACTIVITY_SERVICE_URL: http://activity-service:8023
+      PREFERENCES_SERVICE_URL: http://preferences-service:8024
+      SESSION_SERVICE_URL: http://session-service:8011
+      FEATURE_FLAG_SERVICE_URL: http://feature-flag-service:8031
+    depends_on:
+      auth-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:8001/health', r => r.statusCode === 200 ? process.exit(0) : process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  bff-service:
+    build:
+      context: .
+      dockerfile: services/bff-service/Dockerfile
+    container_name: mobility-bff
+    restart: unless-stopped
+    ports:
+      - "8002:8002"
+    environment:
+      PORT: 8002
+      USER_SERVICE_URL: http://user-service:8020
+      PROFILE_SERVICE_URL: http://profile-service:8021
+      PREFERENCES_SERVICE_URL: http://preferences-service:8024
+      ACTIVITY_SERVICE_URL: http://activity-service:8023
+      FEATURE_FLAG_SERVICE_URL: http://feature-flag-service:8031
+    depends_on:
+      auth-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:8002/health', r => r.statusCode === 200 ? process.exit(0) : process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
 volumes:
   postgres_data:
