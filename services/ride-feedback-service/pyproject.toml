@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ride-feedback-service"
+version = "0.1.0"
+description = "Ride feedback and ratings — riders rate drivers and trips"
+requires-python = ">=3.11"
+dependencies = [
+    "mobility-common",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "httpx>=0.25",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

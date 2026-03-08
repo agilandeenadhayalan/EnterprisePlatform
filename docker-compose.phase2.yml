@@ -1,0 +1,810 @@
+# ==============================================
+# Smart Mobility & Analytics Platform
+# Phase 2: Event-Driven Architecture Overlay
+# ==============================================
+#
+# Usage:
+#   docker-compose -f docker-compose.yml -f docker-compose.phase2.yml up -d
+#
+# This overlay adds:
+#   - Kafka (KRaft mode, no ZooKeeper)
+#   - Schema Registry (Confluent)
+#   - Kafka UI (Provectus)
+#   - 49 Phase 2 microservices
+#
+# ==============================================
+
+# ── Shared config for Phase 2 Python services ──
+x-phase2-python-service: &phase2-python-service
+  restart: unless-stopped
+  environment: &phase2-python-env
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: 5432
+    POSTGRES_DB: mobility_platform
+    POSTGRES_USER: mobility
+    POSTGRES_PASSWORD: mobility_dev_2024
+    REDIS_HOST: redis
+    REDIS_PORT: 6379
+    JWT_SECRET_KEY: dev-secret-key-change-in-production
+    JWT_ALGORITHM: HS256
+    KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    SCHEMA_REGISTRY_URL: http://schema-registry:8081
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    kafka:
+      condition: service_healthy
+  deploy:
+    resources:
+      limits:
+        memory: 256M
+
+services:
+  # ══════════════════════════════════════════════
+  # Phase 2 Infrastructure
+  # ══════════════════════════════════════════════
+
+  # ── Kafka (KRaft mode) ──
+  # WHY: Event bus for domain events. KRaft eliminates ZooKeeper dependency
+  # by using Kafka's built-in Raft consensus for metadata management.
+  # ALTERNATIVE: RabbitMQ (simpler), Pulsar (multi-tenancy), Redpanda (C++)
+  kafka:
+    image: bitnami/kafka:3.7
+    container_name: mobility-kafka
+    restart: unless-stopped
+    ports:
+      - "29094:29094"    # External listener for host access
+    environment:
+      # KRaft mode (no ZooKeeper)
+      KAFKA_CFG_NODE_ID: 1
+      KAFKA_CFG_PROCESS_ROLES: broker,controller
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+
+      # Listeners
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:29094
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:29094
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+
+      # Performance tuning
+      KAFKA_CFG_NUM_PARTITIONS: 6
+      KAFKA_CFG_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_CFG_LOG_RETENTION_HOURS: 168       # 7 days
+      KAFKA_CFG_LOG_SEGMENT_BYTES: 1073741824  # 1GB segments
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes:
+      - kafka_data:/bitnami/kafka
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  # ── Schema Registry ──
+  # WHY: Enforces event schema compatibility. Prevents breaking changes
+  # when producer schemas evolve — consumers won't crash on unknown fields.
+  # ALTERNATIVE: Apicurio Registry (OSS), AWS Glue Schema Registry
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.6.0
+    container_name: mobility-schema-registry
+    restart: unless-stopped
+    ports:
+      - "8089:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:9092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/subjects"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # ── Kafka UI ──
+  # WHY: Visual monitoring for topics, consumer groups, and message flow.
+  # Essential for debugging event-driven systems.
+  # ALTERNATIVE: AKHQ, Conduktor, Redpanda Console
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: mobility-kafka-ui
+    restart: unless-stopped
+    ports:
+      - "8088:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: mobility-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+    depends_on:
+      kafka:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # ══════════════════════════════════════════════
+  # Phase 2 Microservices (49 total)
+  # ══════════════════════════════════════════════
+
+  # ── Driver Domain (8 services) ──
+
+  driver-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/driver-service/Dockerfile
+    container_name: mobility-driver
+    ports:
+      - "8040:8040"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8040/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  driver-location-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/driver-location-service/Dockerfile
+    container_name: mobility-driver-location
+    ports:
+      - "8041:8041"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8041/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  driver-availability-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/driver-availability-service/Dockerfile
+    container_name: mobility-driver-availability
+    ports:
+      - "8042:8042"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8042/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  driver-matching-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/driver-matching-service/Dockerfile
+    container_name: mobility-driver-matching
+    ports:
+      - "8043:8043"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8043/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  driver-rating-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/driver-rating-service/Dockerfile
+    container_name: mobility-driver-rating
+    ports:
+      - "8044:8044"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8044/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  driver-earnings-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/driver-earnings-service/Dockerfile
+    container_name: mobility-driver-earnings
+    ports:
+      - "8045:8045"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8045/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  driver-document-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/driver-document-service/Dockerfile
+    container_name: mobility-driver-document
+    ports:
+      - "8046:8046"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8046/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  driver-incentive-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/driver-incentive-service/Dockerfile
+    container_name: mobility-driver-incentive
+    ports:
+      - "8047:8047"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8047/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Trip & Mobility Domain (8 services) ──
+
+  trip-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/trip-service/Dockerfile
+    container_name: mobility-trip
+    ports:
+      - "8050:8050"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8050/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  ride-request-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/ride-request-service/Dockerfile
+    container_name: mobility-ride-request
+    ports:
+      - "8051:8051"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8051/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  ride-tracking-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/ride-tracking-service/Dockerfile
+    container_name: mobility-ride-tracking
+    ports:
+      - "8052:8052"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8052/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  ride-feedback-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/ride-feedback-service/Dockerfile
+    container_name: mobility-ride-feedback
+    ports:
+      - "8053:8053"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8053/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  ride-history-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/ride-history-service/Dockerfile
+    container_name: mobility-ride-history
+    ports:
+      - "8054:8054"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8054/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  route-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/route-service/Dockerfile
+    container_name: mobility-route
+    ports:
+      - "8055:8055"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8055/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  location-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/location-service/Dockerfile
+    container_name: mobility-location
+    ports:
+      - "8056:8056"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8056/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Vehicle Domain (4 services) ──
+
+  vehicle-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/vehicle-service/Dockerfile
+    container_name: mobility-vehicle
+    ports:
+      - "8057:8057"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8057/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  vehicle-inspection-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/vehicle-inspection-service/Dockerfile
+    container_name: mobility-vehicle-inspection
+    ports:
+      - "8058:8058"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8058/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  vehicle-maintenance-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/vehicle-maintenance-service/Dockerfile
+    container_name: mobility-vehicle-maintenance
+    ports:
+      - "8059:8059"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8059/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  vehicle-type-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/vehicle-type-service/Dockerfile
+    container_name: mobility-vehicle-type
+    ports:
+      - "8060:8060"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8060/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Dispatch Domain (1 service) ──
+
+  dispatch-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/dispatch-service/Dockerfile
+    container_name: mobility-dispatch
+    ports:
+      - "8061:8061"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8061/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Pricing Domain (6 services) ──
+
+  pricing-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/pricing-service/Dockerfile
+    container_name: mobility-pricing
+    ports:
+      - "8070:8070"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8070/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  surge-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/surge-service/Dockerfile
+    container_name: mobility-surge
+    ports:
+      - "8071:8071"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8071/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  discount-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/discount-service/Dockerfile
+    container_name: mobility-discount
+    ports:
+      - "8072:8072"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8072/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  promotion-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/promotion-service/Dockerfile
+    container_name: mobility-promotion
+    ports:
+      - "8073:8073"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8073/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  fare-calculation-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/fare-calculation-service/Dockerfile
+    container_name: mobility-fare-calculation
+    ports:
+      - "8074:8074"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8074/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  dynamic-pricing-ai-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/dynamic-pricing-ai-service/Dockerfile
+    container_name: mobility-dynamic-pricing-ai
+    ports:
+      - "8075:8075"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8075/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Payment Domain (7 services) ──
+
+  payment-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/payment-service/Dockerfile
+    container_name: mobility-payment
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  payment-method-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/payment-method-service/Dockerfile
+    container_name: mobility-payment-method
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  refund-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/refund-service/Dockerfile
+    container_name: mobility-refund
+    ports:
+      - "8082:8082"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8082/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  payout-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/payout-service/Dockerfile
+    container_name: mobility-payout
+    ports:
+      - "8083:8083"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8083/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  wallet-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/wallet-service/Dockerfile
+    container_name: mobility-wallet
+    ports:
+      - "8084:8084"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8084/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  fare-split-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/fare-split-service/Dockerfile
+    container_name: mobility-fare-split
+    ports:
+      - "8085:8085"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8085/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  toll-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/toll-service/Dockerfile
+    container_name: mobility-toll
+    ports:
+      - "8086:8086"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8086/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Communication Domain (6 services) ──
+
+  notification-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/notification-service/Dockerfile
+    container_name: mobility-notification
+    ports:
+      - "8090:8090"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  push-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/push-service/Dockerfile
+    container_name: mobility-push
+    ports:
+      - "8091:8091"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8091/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  email-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/email-service/Dockerfile
+    container_name: mobility-email
+    ports:
+      - "8092:8092"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8092/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  sms-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/sms-service/Dockerfile
+    container_name: mobility-sms
+    ports:
+      - "8093:8093"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8093/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  chat-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/chat-service/Dockerfile
+    container_name: mobility-chat
+    ports:
+      - "8094:8094"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8094/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  presence-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/presence-service/Dockerfile
+    container_name: mobility-presence
+    ports:
+      - "8095:8095"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8095/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Real-time & Search (3 services) ──
+
+  websocket-gateway:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/websocket-gateway/Dockerfile
+    container_name: mobility-websocket
+    ports:
+      - "8096:8096"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8096/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  search-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/search-service/Dockerfile
+    container_name: mobility-search
+    ports:
+      - "8097:8097"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8097/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  autocomplete-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/autocomplete-service/Dockerfile
+    container_name: mobility-autocomplete
+    ports:
+      - "8098:8098"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8098/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Marketplace (4 services) ──
+
+  loyalty-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/loyalty-service/Dockerfile
+    container_name: mobility-loyalty
+    ports:
+      - "8099:8099"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8099/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  fleet-management-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/fleet-management-service/Dockerfile
+    container_name: mobility-fleet-management
+    ports:
+      - "8100:8100"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  subscription-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/subscription-service/Dockerfile
+    container_name: mobility-subscription
+    ports:
+      - "8101:8101"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8101/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  support-ticket-service:
+    <<: *phase2-python-service
+    build:
+      context: .
+      dockerfile: services/support-ticket-service/Dockerfile
+    container_name: mobility-support-ticket
+    ports:
+      - "8102:8102"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8102/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  kafka_data:
+    name: mobility-kafka-data

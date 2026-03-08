@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fare-split-service"
+version = "0.1.0"
+description = "Fare split service — split ride costs between multiple riders"
+requires-python = ">=3.11"
+dependencies = ["mobility-common"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.21", "httpx>=0.25"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

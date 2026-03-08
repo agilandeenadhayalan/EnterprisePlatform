@@ -18,6 +18,7 @@ dependencies = [
     "pyjwt>=2.8",
     "bcrypt>=4.1",
     "httpx>=0.25",
+    "aiokafka>=0.10",
 ]
 
 [project.optional-dependencies]
