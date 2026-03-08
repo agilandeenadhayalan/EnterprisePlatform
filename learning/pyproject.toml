@@ -1,0 +1,15 @@
+[project]
+name = "smart-mobility-learning"
+version = "0.1.0"
+description = "Smart Mobility & Analytics Platform — Learning Modules"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["phase_1/tests", "phase_2/tests", "phase_3/tests", "phase_4/tests", "phase_5/tests", "phase_6/tests", "phase_7/tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests requiring Docker services",
+]

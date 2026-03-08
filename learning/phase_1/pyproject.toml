@@ -1,0 +1,15 @@
+[project]
+name = "phase-1-platform-foundation"
+version = "0.1.0"
+description = "Phase 1: Platform Foundation — API Gateway, Auth, Database, Caching, Containers"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "exercises"]
+python_files = ["test_*.py", "ex*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+markers = [
+    "slow: marks tests as slow",
+    "integration: marks tests requiring Docker services",
+]

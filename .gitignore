@@ -1,0 +1,92 @@
+# ==============================================
+# Smart Mobility & Analytics Platform - .gitignore
+# ==============================================
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+.venv/
+venv/
+*.whl
+
+# ── TypeScript / Node.js ──
+node_modules/
+.next/
+.nuxt/
+.turbo/
+*.tsbuildinfo
+.npm/
+.yarn/
+
+# ── Environment ──
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# ── IDE ──
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── Data (large files — download locally, don't commit) ──
+data/raw/
+data/processed/
+*.parquet
+*.csv.gz
+*.avro
+!data/seeds/**
+
+# ── Docker ──
+docker-compose.override.yml
+
+# ── Kubernetes secrets ──
+*-secret.yaml
+*.sealed.yaml
+
+# ── ML artifacts ──
+mlruns/
+mlflow-artifacts/
+*.pt
+*.pth
+*.onnx
+*.pkl
+*.joblib
+*.h5
+!data/seeds/*.pkl
+
+# ── Build outputs ──
+docs/build/
+docs/.docusaurus/
+coverage/
+htmlcov/
+.coverage
+*.lcov
+.pytest_cache/
+.mypy_cache/
+
+# ── OS ──
+*.log
+*.pid
+*.seed
+
+# ── Terraform ──
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+!*.tfvars.example
+
+# ── Claude Code ──
+.claude/settings.local.json

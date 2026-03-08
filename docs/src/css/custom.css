@@ -1,0 +1,27 @@
+/**
+ * Smart Mobility Platform — Custom Theme
+ * Blue-teal palette for a transportation/mobility platform feel.
+ */
+
+:root {
+  --ifm-color-primary: #1a73e8;
+  --ifm-color-primary-dark: #1765d0;
+  --ifm-color-primary-darker: #165fc4;
+  --ifm-color-primary-darkest: #124ea2;
+  --ifm-color-primary-light: #2d80eb;
+  --ifm-color-primary-lighter: #3988ec;
+  --ifm-color-primary-lightest: #5e9fef;
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #4da6ff;
+  --ifm-color-primary-dark: #2d96ff;
+  --ifm-color-primary-darker: #1d8eff;
+  --ifm-color-primary-darkest: #0074e6;
+  --ifm-color-primary-light: #6db6ff;
+  --ifm-color-primary-lighter: #7dbeff;
+  --ifm-color-primary-lightest: #add6ff;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+}

@@ -1,0 +1,104 @@
+# ==============================================
+# Smart Mobility & Analytics Platform
+# Phase 1: Core Infrastructure
+# ==============================================
+#
+# Usage:
+#   docker-compose up -d          # Start Phase 1 infrastructure
+#   docker-compose logs -f        # Follow all logs
+#   docker-compose down -v        # Stop and remove volumes
+#
+# Phase 2+: Layer additional services with override files:
+#   docker-compose -f docker-compose.yml -f docker-compose.phase2.yml up -d
+#
+# ==============================================
+
+services:
+  # ── PostgreSQL 16 ──
+  # WHY: Industry-standard RDBMS for transactional data (users, trips, payments).
+  # Supports JSONB, PostGIS, partitioning, and advanced indexing.
+  # ALTERNATIVE: MySQL, CockroachDB (distributed), or Supabase (managed)
+  postgres:
+    image: postgres:16-alpine
+    container_name: mobility-postgres
+    restart: unless-stopped
+    ports:
+      - "5433:5432"       # Remapped to avoid conflicts with local PostgreSQL
+    environment:
+      POSTGRES_DB: mobility_platform
+      POSTGRES_USER: mobility
+      POSTGRES_PASSWORD: mobility_dev_2024
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=en_US.utf8 --lc-ctype=en_US.utf8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/scripts/init-postgres.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mobility -d mobility_platform"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  # ── Redis 7 ──
+  # WHY: In-memory store for caching (user sessions, API responses),
+  # rate limiting counters, and real-time feature serving (Phase 4+).
+  # ALTERNATIVE: Memcached (simpler), Valkey (Redis fork), DragonflyDB (faster)
+  redis:
+    image: redis:7-alpine
+    container_name: mobility-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"       # Remapped to avoid conflicts with local Redis
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --save 60 1000
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # ── pgAdmin 4 ──
+  # WHY: Visual database management tool for exploring schemas,
+  # running queries, and understanding data structures.
+  # ALTERNATIVE: DBeaver (desktop), Adminer (lightweight), DataGrip (JetBrains)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: mobility-pgadmin
+    restart: unless-stopped
+    ports:
+      - "5050:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@mobility.dev
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+volumes:
+  postgres_data:
+    name: mobility-postgres-data
+  redis_data:
+    name: mobility-redis-data
+  pgadmin_data:
+    name: mobility-pgadmin-data
