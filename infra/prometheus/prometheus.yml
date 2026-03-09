@@ -1,0 +1,32 @@
+# Prometheus configuration for Smart Mobility Platform
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'grafana'
+    static_configs:
+      - targets: ['grafana:3000']
+
+  - job_name: 'phase5-observability'
+    static_configs:
+      - targets:
+          - 'alerting-service:8000'
+          - 'health-check-service:8000'
+          - 'metrics-aggregation-service:8000'
+          - 'log-aggregation-service:8000'
+          - 'trace-collector-service:8000'
+    metrics_path: '/metrics'
+
+  - job_name: 'phase5-devops'
+    static_configs:
+      - targets:
+          - 'deployment-service:8000'
+          - 'slo-tracker-service:8000'
+          - 'synthetic-monitor-service:8000'
+          - 'chaos-experiment-service:8000'
+    metrics_path: '/metrics'

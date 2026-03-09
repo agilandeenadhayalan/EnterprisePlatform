@@ -1117,6 +1117,142 @@ CREATE INDEX idx_training_jobs_model ON ml.training_jobs(model_name);
 CREATE INDEX idx_ab_tests_status ON ml.ab_tests(status);
 CREATE INDEX idx_retraining_triggers_model ON ml.retraining_triggers(model_name);
 
+-- ══════════════════════════════════════════════════════════════════════
+-- PHASE 5: DEVOPS SCHEMA
+-- Infrastructure & DevOps tables for observability, deployments,
+-- SLOs, synthetic monitoring, and chaos engineering.
+-- ══════════════════════════════════════════════════════════════════════
+
+CREATE SCHEMA IF NOT EXISTS devops;
+
+-- Alert rules and history
+CREATE TABLE IF NOT EXISTS devops.alert_rules (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name            VARCHAR(200) NOT NULL UNIQUE,
+    severity        VARCHAR(20) NOT NULL DEFAULT 'warning',
+    condition_type  VARCHAR(50) NOT NULL,
+    condition_config JSONB NOT NULL DEFAULT '{}',
+    channel         VARCHAR(50) NOT NULL DEFAULT 'email',
+    is_active       BOOLEAN NOT NULL DEFAULT true,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS devops.alert_history (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    rule_id         UUID NOT NULL REFERENCES devops.alert_rules(id),
+    status          VARCHAR(20) NOT NULL DEFAULT 'firing',
+    fired_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    resolved_at     TIMESTAMPTZ,
+    acknowledged_by VARCHAR(200),
+    message         TEXT
+);
+
+-- Service health checks
+CREATE TABLE IF NOT EXISTS devops.service_health (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    service_name    VARCHAR(200) NOT NULL,
+    health_type     VARCHAR(20) NOT NULL DEFAULT 'http',
+    endpoint        VARCHAR(500) NOT NULL,
+    status          VARCHAR(20) NOT NULL DEFAULT 'unknown',
+    response_time_ms DOUBLE PRECISION,
+    checked_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Deployments
+CREATE TABLE IF NOT EXISTS devops.deployments (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    service_name    VARCHAR(200) NOT NULL,
+    version         VARCHAR(50) NOT NULL,
+    strategy        VARCHAR(30) NOT NULL DEFAULT 'rolling',
+    environment     VARCHAR(30) NOT NULL DEFAULT 'dev',
+    status          VARCHAR(30) NOT NULL DEFAULT 'pending',
+    started_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at    TIMESTAMPTZ,
+    rolled_back     BOOLEAN NOT NULL DEFAULT false
+);
+
+CREATE TABLE IF NOT EXISTS devops.deployment_history (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    deployment_id   UUID NOT NULL REFERENCES devops.deployments(id),
+    action          VARCHAR(50) NOT NULL,
+    details         JSONB NOT NULL DEFAULT '{}',
+    timestamp       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- SLO definitions and records
+CREATE TABLE IF NOT EXISTS devops.slo_definitions (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    service_name        VARCHAR(200) NOT NULL,
+    slo_type            VARCHAR(50) NOT NULL,
+    target_percentage   DOUBLE PRECISION NOT NULL,
+    window_days         INTEGER NOT NULL DEFAULT 30,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS devops.slo_records (
+    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    slo_id                  UUID NOT NULL REFERENCES devops.slo_definitions(id),
+    period_start            DATE NOT NULL,
+    period_end              DATE NOT NULL,
+    good_events             BIGINT NOT NULL DEFAULT 0,
+    total_events            BIGINT NOT NULL DEFAULT 0,
+    error_budget_remaining  DOUBLE PRECISION NOT NULL DEFAULT 100.0
+);
+
+-- Synthetic monitors
+CREATE TABLE IF NOT EXISTS devops.synthetic_monitors (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name            VARCHAR(200) NOT NULL,
+    monitor_type    VARCHAR(20) NOT NULL DEFAULT 'http',
+    target_url      VARCHAR(500) NOT NULL,
+    interval_seconds INTEGER NOT NULL DEFAULT 60,
+    is_active       BOOLEAN NOT NULL DEFAULT true,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS devops.synthetic_results (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    monitor_id      UUID NOT NULL REFERENCES devops.synthetic_monitors(id),
+    status_code     INTEGER,
+    response_time_ms DOUBLE PRECISION,
+    is_success      BOOLEAN NOT NULL DEFAULT true,
+    checked_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Chaos experiments
+CREATE TABLE IF NOT EXISTS devops.chaos_experiments (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name            VARCHAR(200) NOT NULL,
+    experiment_type VARCHAR(50) NOT NULL,
+    target_service  VARCHAR(200) NOT NULL,
+    blast_radius    VARCHAR(50) NOT NULL DEFAULT 'single-service',
+    status          VARCHAR(30) NOT NULL DEFAULT 'draft',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS devops.chaos_runs (
+    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    experiment_id           UUID NOT NULL REFERENCES devops.chaos_experiments(id),
+    started_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ended_at                TIMESTAMPTZ,
+    steady_state_before     JSONB NOT NULL DEFAULT '{}',
+    steady_state_after      JSONB,
+    result                  VARCHAR(30) NOT NULL DEFAULT 'pending'
+);
+
+-- Indexes for Phase 5
+CREATE INDEX IF NOT EXISTS idx_alert_rules_severity ON devops.alert_rules(severity);
+CREATE INDEX IF NOT EXISTS idx_alert_rules_active ON devops.alert_rules(is_active);
+CREATE INDEX IF NOT EXISTS idx_alert_history_rule_id ON devops.alert_history(rule_id);
+CREATE INDEX IF NOT EXISTS idx_alert_history_status ON devops.alert_history(status);
+CREATE INDEX IF NOT EXISTS idx_service_health_name ON devops.service_health(service_name);
+CREATE INDEX IF NOT EXISTS idx_deployments_service ON devops.deployments(service_name);
+CREATE INDEX IF NOT EXISTS idx_deployments_env ON devops.deployments(environment);
+CREATE INDEX IF NOT EXISTS idx_slo_records_slo_id ON devops.slo_records(slo_id);
+CREATE INDEX IF NOT EXISTS idx_synthetic_results_monitor ON devops.synthetic_results(monitor_id);
+CREATE INDEX IF NOT EXISTS idx_chaos_runs_experiment ON devops.chaos_runs(experiment_id);
+
 -- ── Report ──
 DO $$
 BEGIN
@@ -1125,12 +1261,12 @@ BEGIN
     RAISE NOTICE 'Schemas: identity, users, platform,';
     RAISE NOTICE '  drivers, trips, vehicles, dispatch,';
     RAISE NOTICE '  pricing, payments, comms, marketplace,';
-    RAISE NOTICE '  analytics';
-    RAISE NOTICE '  ml';
+    RAISE NOTICE '  analytics, ml, devops';
     RAISE NOTICE 'Phase 1 Tables: 17';
     RAISE NOTICE 'Phase 2 Tables: 30+';
     RAISE NOTICE 'Phase 3 Tables: 7';
     RAISE NOTICE 'Phase 4 Tables: 7';
+    RAISE NOTICE 'Phase 5 Tables: 11 (devops schema)';
     RAISE NOTICE 'Roles: rider, driver, admin, support';
     RAISE NOTICE 'Admin: admin@mobility.dev';
     RAISE NOTICE '========================================';

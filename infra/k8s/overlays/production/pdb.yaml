@@ -1,0 +1,14 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: app-pdb
+  labels:
+    app: app
+    app.kubernetes.io/name: app
+    app.kubernetes.io/component: service
+    app.kubernetes.io/part-of: mobility-platform
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: app

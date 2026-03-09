@@ -1,0 +1,32 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base/infra
+  - ../../base/services
+
+commonLabels:
+  environment: dev
+
+patches:
+  - patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: app
+      spec:
+        replicas: 1
+        template:
+          spec:
+            containers:
+              - name: app
+                resources:
+                  limits:
+                    memory: 128Mi
+                    cpu: 100m
+                env:
+                  - name: LOG_LEVEL
+                    value: debug
+    target:
+      kind: Deployment
+      labelSelector: "app.kubernetes.io/part-of=mobility-platform"

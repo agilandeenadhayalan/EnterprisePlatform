@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+  labels:
+    app: app
+    app.kubernetes.io/name: app
+    app.kubernetes.io/component: service
+    app.kubernetes.io/part-of: mobility-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: app
+  template:
+    metadata:
+      labels:
+        app: app
+        app.kubernetes.io/name: app
+        app.kubernetes.io/component: service
+        app.kubernetes.io/part-of: mobility-platform
+    spec:
+      containers:
+        - name: app
+          # In production, replace with your actual image repository and tag:
+          #   image: ${IMAGE_REPOSITORY}:${IMAGE_TAG}
+          # Example: image: gcr.io/mobility-platform/api-gateway:v1.0.0
+          image: mobility-platform/app:latest
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: app-config
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
