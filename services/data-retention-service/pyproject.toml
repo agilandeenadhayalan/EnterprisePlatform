@@ -1,0 +1,13 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "data-retention-service"
+version = "0.1.0"
+description = "Enforces TTL policies on ClickHouse tables and MinIO buckets"
+requires-python = ">=3.11"
+dependencies = ["mobility-common"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]

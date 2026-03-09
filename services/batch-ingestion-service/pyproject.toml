@@ -1,0 +1,13 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "batch-ingestion-service"
+version = "0.1.0"
+description = "Generic batch file ingestion: accepts file metadata and stores in MinIO Bronze layer"
+requires-python = ">=3.11"
+dependencies = ["mobility-common"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]

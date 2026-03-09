@@ -884,6 +884,132 @@ INSERT INTO pricing.pricing_rules (vehicle_type, base_fare, per_mile_rate, per_m
     ('xl', 4.00, 2.00, 0.35, 12.00, 2.99),
     ('luxury', 8.00, 3.50, 0.60, 25.00, 4.99);
 
+-- ══════════════════════════════════════════════
+-- Phase 3: Data Platform Tables
+-- ══════════════════════════════════════════════
+
+CREATE SCHEMA IF NOT EXISTS analytics;
+
+-- Data Catalog: metadata registry for all datasets
+CREATE TABLE analytics.datasets (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) UNIQUE NOT NULL,
+    description TEXT,
+    data_store VARCHAR(50) NOT NULL,        -- clickhouse, minio, postgres
+    location VARCHAR(512) NOT NULL,          -- table name or bucket/prefix
+    schema_definition JSONB,
+    owner VARCHAR(100),
+    classification VARCHAR(30) DEFAULT 'internal',
+    row_count BIGINT DEFAULT 0,
+    size_bytes BIGINT DEFAULT 0,
+    freshness_seconds INT,
+    last_updated_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Data Lineage: directed graph of data flow
+CREATE TABLE analytics.lineage_edges (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_dataset_id UUID REFERENCES analytics.datasets(id),
+    target_dataset_id UUID REFERENCES analytics.datasets(id),
+    transformation_type VARCHAR(50),
+    transformation_description TEXT,
+    service_name VARCHAR(100),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Data Quality Rules
+CREATE TABLE analytics.quality_rules (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    dataset_id UUID REFERENCES analytics.datasets(id),
+    rule_name VARCHAR(100) NOT NULL,
+    rule_type VARCHAR(30) NOT NULL,          -- completeness, freshness, accuracy, consistency, uniqueness
+    column_name VARCHAR(100),
+    expression TEXT NOT NULL,
+    threshold DECIMAL(10,4),
+    severity VARCHAR(20) DEFAULT 'warning',
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Data Quality Results
+CREATE TABLE analytics.quality_results (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    rule_id UUID REFERENCES analytics.quality_rules(id),
+    status VARCHAR(10) NOT NULL,              -- pass, fail, warn, error
+    metric_value DECIMAL(10,4),
+    details TEXT,
+    checked_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ETL Job Tracking
+CREATE TABLE analytics.etl_jobs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    job_name VARCHAR(100) NOT NULL,
+    job_type VARCHAR(30) NOT NULL,            -- batch, streaming, cdc
+    source VARCHAR(255),
+    destination VARCHAR(255),
+    schedule VARCHAR(100),
+    status VARCHAR(20) DEFAULT 'idle',
+    last_run_at TIMESTAMPTZ,
+    last_success_at TIMESTAMPTZ,
+    last_error TEXT,
+    rows_processed BIGINT DEFAULT 0,
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Data Governance Policies
+CREATE TABLE analytics.governance_policies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    policy_type VARCHAR(30) NOT NULL,         -- access, retention, classification, masking
+    rules JSONB NOT NULL,
+    applies_to JSONB,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Reports
+CREATE TABLE analytics.reports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    report_type VARCHAR(50) NOT NULL,
+    parameters JSONB DEFAULT '{}',
+    result JSONB,
+    status VARCHAR(20) DEFAULT 'pending',
+    generated_by VARCHAR(100),
+    generated_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Schema Migrations (ClickHouse DDL versioning)
+CREATE TABLE analytics.schema_migrations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    version VARCHAR(50) NOT NULL,
+    description TEXT,
+    sql_up TEXT NOT NULL,
+    sql_down TEXT,
+    applied_at TIMESTAMPTZ DEFAULT NOW(),
+    status VARCHAR(20) DEFAULT 'applied'
+);
+
+-- Phase 3 Indexes
+CREATE INDEX idx_datasets_store ON analytics.datasets(data_store);
+CREATE INDEX idx_datasets_name ON analytics.datasets(name);
+CREATE INDEX idx_lineage_source ON analytics.lineage_edges(source_dataset_id);
+CREATE INDEX idx_lineage_target ON analytics.lineage_edges(target_dataset_id);
+CREATE INDEX idx_quality_rules_dataset ON analytics.quality_rules(dataset_id);
+CREATE INDEX idx_quality_results_rule ON analytics.quality_results(rule_id);
+CREATE INDEX idx_quality_results_time ON analytics.quality_results(checked_at DESC);
+CREATE INDEX idx_etl_jobs_status ON analytics.etl_jobs(status);
+CREATE INDEX idx_etl_jobs_name ON analytics.etl_jobs(job_name);
+CREATE INDEX idx_reports_type ON analytics.reports(report_type);
+CREATE INDEX idx_reports_status ON analytics.reports(status);
+
 -- ── Report ──
 DO $$
 BEGIN
@@ -891,9 +1017,11 @@ BEGIN
     RAISE NOTICE 'Smart Mobility Platform DB initialized!';
     RAISE NOTICE 'Schemas: identity, users, platform,';
     RAISE NOTICE '  drivers, trips, vehicles, dispatch,';
-    RAISE NOTICE '  pricing, payments, comms, marketplace';
+    RAISE NOTICE '  pricing, payments, comms, marketplace,';
+    RAISE NOTICE '  analytics';
     RAISE NOTICE 'Phase 1 Tables: 17';
     RAISE NOTICE 'Phase 2 Tables: 30+';
+    RAISE NOTICE 'Phase 3 Tables: 7';
     RAISE NOTICE 'Roles: rider, driver, admin, support';
     RAISE NOTICE 'Admin: admin@mobility.dev';
     RAISE NOTICE '========================================';

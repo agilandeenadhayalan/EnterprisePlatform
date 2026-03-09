@@ -1,0 +1,527 @@
+# ==============================================
+# Smart Mobility & Analytics Platform
+# Phase 3: Data Platform Overlay
+# ==============================================
+#
+# Usage:
+#   docker-compose -f docker-compose.yml -f docker-compose.phase2.yml -f docker-compose.phase3.yml up -d
+#
+# This overlay adds:
+#   - ClickHouse (column-oriented OLAP warehouse)
+#   - MinIO (S3-compatible data lake)
+#   - 27 Phase 3 data platform microservices
+#
+# ==============================================
+
+# ── Shared config for Phase 3 Python services ──
+x-phase3-python-service: &phase3-python-service
+  restart: unless-stopped
+  environment: &phase3-python-env
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: 5432
+    POSTGRES_DB: mobility_platform
+    POSTGRES_USER: mobility
+    POSTGRES_PASSWORD: mobility_dev_2024
+    REDIS_HOST: redis
+    REDIS_PORT: 6379
+    JWT_SECRET_KEY: dev-secret-key-change-in-production
+    JWT_ALGORITHM: HS256
+    KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    SCHEMA_REGISTRY_URL: http://schema-registry:8081
+    # Phase 3: ClickHouse
+    CLICKHOUSE_HOST: clickhouse
+    CLICKHOUSE_PORT: 8123
+    CLICKHOUSE_NATIVE_PORT: 9000
+    CLICKHOUSE_DB: mobility_analytics
+    CLICKHOUSE_USER: default
+    CLICKHOUSE_PASSWORD: ""
+    # Phase 3: MinIO
+    MINIO_ENDPOINT: minio:9000
+    MINIO_ACCESS_KEY: minioadmin
+    MINIO_SECRET_KEY: minioadmin
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  deploy:
+    resources:
+      limits:
+        memory: 256M
+
+services:
+
+  # ══════════════════════════════════════════════
+  # Infrastructure
+  # ══════════════════════════════════════════════
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    container_name: mobility-clickhouse
+    restart: unless-stopped
+    ports:
+      - "8123:8123"     # HTTP interface
+      - "9000:9000"     # Native TCP interface
+    environment:
+      CLICKHOUSE_DB: mobility_analytics
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+      - ./infra/scripts/init-clickhouse.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  minio:
+    image: minio/minio:latest
+    container_name: mobility-minio
+    restart: unless-stopped
+    ports:
+      - "9002:9000"     # S3 API (remapped — 9000 used by ClickHouse native)
+      - "9003:9001"     # MinIO Console
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: mobility-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin;
+      mc mb --ignore-existing local/mobility-bronze;
+      mc mb --ignore-existing local/mobility-silver;
+      mc mb --ignore-existing local/mobility-gold;
+      mc mb --ignore-existing local/mobility-checkpoints;
+      exit 0;
+      "
+
+  # ══════════════════════════════════════════════
+  # Stream Processing Domain (8 services)
+  # ══════════════════════════════════════════════
+
+  stream-processor-rides:
+    <<: *phase3-python-service
+    build:
+      context: ./services/stream-processor-rides
+      dockerfile: Dockerfile
+    ports:
+      - "8110:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  stream-processor-locations:
+    <<: *phase3-python-service
+    build:
+      context: ./services/stream-processor-locations
+      dockerfile: Dockerfile
+    ports:
+      - "8111:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  stream-processor-metrics:
+    <<: *phase3-python-service
+    build:
+      context: ./services/stream-processor-metrics
+      dockerfile: Dockerfile
+    ports:
+      - "8112:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  kafka-consumer-rides:
+    <<: *phase3-python-service
+    build:
+      context: ./services/kafka-consumer-rides
+      dockerfile: Dockerfile
+    ports:
+      - "8113:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  kafka-consumer-locations:
+    <<: *phase3-python-service
+    build:
+      context: ./services/kafka-consumer-locations
+      dockerfile: Dockerfile
+    ports:
+      - "8114:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  kafka-consumer-payments:
+    <<: *phase3-python-service
+    build:
+      context: ./services/kafka-consumer-payments
+      dockerfile: Dockerfile
+    ports:
+      - "8115:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  stream-dedup-service:
+    <<: *phase3-python-service
+    build:
+      context: ./services/stream-dedup-service
+      dockerfile: Dockerfile
+    ports:
+      - "8116:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  stream-enrichment-service:
+    <<: *phase3-python-service
+    build:
+      context: ./services/stream-enrichment-service
+      dockerfile: Dockerfile
+    ports:
+      - "8117:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ══════════════════════════════════════════════
+  # ETL / Batch Domain (6 services)
+  # ══════════════════════════════════════════════
+
+  etl-worker-postgres-to-ch:
+    <<: *phase3-python-service
+    build:
+      context: ./services/etl-worker-postgres-to-ch
+      dockerfile: Dockerfile
+    ports:
+      - "8120:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  etl-worker-taxi-loader:
+    <<: *phase3-python-service
+    build:
+      context: ./services/etl-worker-taxi-loader
+      dockerfile: Dockerfile
+    ports:
+      - "8121:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  etl-worker-weather-loader:
+    <<: *phase3-python-service
+    build:
+      context: ./services/etl-worker-weather-loader
+      dockerfile: Dockerfile
+    ports:
+      - "8122:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  etl-scheduler:
+    <<: *phase3-python-service
+    build:
+      context: ./services/etl-scheduler
+      dockerfile: Dockerfile
+    ports:
+      - "8124:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  batch-ingestion-service:
+    <<: *phase3-python-service
+    build:
+      context: ./services/batch-ingestion-service
+      dockerfile: Dockerfile
+    ports:
+      - "8125:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  cdc-connector:
+    <<: *phase3-python-service
+    build:
+      context: ./services/cdc-connector
+      dockerfile: Dockerfile
+    ports:
+      - "8126:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ══════════════════════════════════════════════
+  # Data Lake Domain (8 services)
+  # ══════════════════════════════════════════════
+
+  data-lake-writer:
+    <<: *phase3-python-service
+    build:
+      context: ./services/data-lake-writer
+      dockerfile: Dockerfile
+    ports:
+      - "8130:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  data-catalog-service:
+    <<: *phase3-python-service
+    build:
+      context: ./services/data-catalog-service
+      dockerfile: Dockerfile
+    ports:
+      - "8131:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  data-lineage-service:
+    <<: *phase3-python-service
+    build:
+      context: ./services/data-lineage-service
+      dockerfile: Dockerfile
+    ports:
+      - "8132:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  data-quality-service:
+    <<: *phase3-python-service
+    build:
+      context: ./services/data-quality-service
+      dockerfile: Dockerfile
+    ports:
+      - "8133:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  data-governance-service:
+    <<: *phase3-python-service
+    build:
+      context: ./services/data-governance-service
+      dockerfile: Dockerfile
+    ports:
+      - "8134:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  data-replication-service:
+    <<: *phase3-python-service
+    build:
+      context: ./services/data-replication-service
+      dockerfile: Dockerfile
+    ports:
+      - "8135:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  data-retention-service:
+    <<: *phase3-python-service
+    build:
+      context: ./services/data-retention-service
+      dockerfile: Dockerfile
+    ports:
+      - "8136:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  schema-migration-service:
+    <<: *phase3-python-service
+    build:
+      context: ./services/schema-migration-service
+      dockerfile: Dockerfile
+    ports:
+      - "8137:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ══════════════════════════════════════════════
+  # Analytics Domain (5 services)
+  # ══════════════════════════════════════════════
+
+  analytics-service:
+    <<: *phase3-python-service
+    build:
+      context: ./services/analytics-service
+      dockerfile: Dockerfile
+    ports:
+      - "8140:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  reporting-service:
+    <<: *phase3-python-service
+    build:
+      context: ./services/reporting-service
+      dockerfile: Dockerfile
+    ports:
+      - "8141:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  dashboard-service:
+    <<: *phase3-python-service
+    build:
+      context: ./services/dashboard-service
+      dockerfile: Dockerfile
+    ports:
+      - "8142:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  data-export-service:
+    <<: *phase3-python-service
+    build:
+      context: ./services/data-export-service
+      dockerfile: Dockerfile
+    ports:
+      - "8143:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  test-data-generator:
+    <<: *phase3-python-service
+    build:
+      context: ./services/test-data-generator
+      dockerfile: Dockerfile
+    ports:
+      - "8144:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  clickhouse_data:
+    name: mobility-clickhouse-data
+  clickhouse_logs:
+    name: mobility-clickhouse-logs
+  minio_data:
+    name: mobility-minio-data

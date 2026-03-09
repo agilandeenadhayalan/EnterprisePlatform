@@ -41,6 +41,23 @@ class Topics:
     PLATFORM_EVENTS = "platform.events.v1"
     AUDIT_TRAIL = "platform.audit.v1"
 
+    # ── Analytics Domain (Phase 3) ──
+    ANALYTICS_METRICS = "analytics.metrics.v1"
+    ANALYTICS_AGGREGATES = "analytics.aggregates.v1"
+
+    # ── Data Quality Domain (Phase 3) ──
+    DATA_QUALITY_RESULTS = "data.quality.results.v1"
+    DATA_QUALITY_ALERTS = "data.quality.alerts.v1"
+
+    # ── ETL Domain (Phase 3) ──
+    ETL_JOB_STATUS = "etl.job.status.v1"
+    ETL_CDC_EVENTS = "etl.cdc.events.v1"
+
+    # ── Data Lake Domain (Phase 3) ──
+    DATA_LAKE_INGESTED = "data.lake.ingested.v1"
+    DATA_CATALOG_UPDATES = "data.catalog.updates.v1"
+    DATA_LINEAGE_EVENTS = "data.lineage.events.v1"
+
     # ── Dead Letter Queues ──
     DLQ_PREFIX = "dlq."
 
