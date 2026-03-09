@@ -1010,6 +1010,113 @@ CREATE INDEX idx_etl_jobs_name ON analytics.etl_jobs(job_name);
 CREATE INDEX idx_reports_type ON analytics.reports(report_type);
 CREATE INDEX idx_reports_status ON analytics.reports(status);
 
+-- ==============================================
+-- Phase 4: ML Platform Schema
+-- ==============================================
+
+CREATE SCHEMA IF NOT EXISTS ml;
+
+-- Feature definitions registry
+CREATE TABLE ml.feature_definitions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) UNIQUE NOT NULL,
+    entity_type VARCHAR(50) NOT NULL,           -- driver, zone, weather, ride
+    value_type VARCHAR(50) NOT NULL,            -- float, int, boolean, categorical, vector
+    source VARCHAR(255) NOT NULL,               -- pipeline that produces this feature
+    description TEXT,
+    freshness_sla_seconds INT DEFAULT 3600,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Model registry metadata (supplements MLflow)
+CREATE TABLE ml.registered_models (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) UNIQUE NOT NULL,
+    description TEXT,
+    model_type VARCHAR(50) NOT NULL,            -- pytorch, sklearn, xgboost
+    task_type VARCHAR(50) NOT NULL,             -- regression, classification, recommendation
+    current_production_version INT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Model versions
+CREATE TABLE ml.model_versions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    model_name VARCHAR(255) REFERENCES ml.registered_models(name),
+    version INT NOT NULL,
+    mlflow_run_id VARCHAR(255),
+    stage VARCHAR(20) DEFAULT 'none',           -- none, staging, production, archived
+    metrics JSONB,
+    hyperparameters JSONB,
+    training_dataset_id UUID,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    transitioned_at TIMESTAMPTZ,
+    UNIQUE(model_name, version)
+);
+
+-- Training jobs
+CREATE TABLE ml.training_jobs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    model_name VARCHAR(255),
+    model_type VARCHAR(50),
+    hyperparameters JSONB,
+    dataset_id UUID,
+    status VARCHAR(20) DEFAULT 'pending',
+    metrics JSONB,
+    mlflow_run_id VARCHAR(255),
+    error_message TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ
+);
+
+-- Experiments
+CREATE TABLE ml.experiments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) UNIQUE NOT NULL,
+    description TEXT,
+    mlflow_experiment_id VARCHAR(255),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- A/B tests
+CREATE TABLE ml.ab_tests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    champion_model VARCHAR(255) NOT NULL,
+    challenger_model VARCHAR(255) NOT NULL,
+    traffic_split FLOAT DEFAULT 0.5,
+    status VARCHAR(20) DEFAULT 'active',
+    winner VARCHAR(255),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    concluded_at TIMESTAMPTZ
+);
+
+-- Retraining triggers
+CREATE TABLE ml.retraining_triggers (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    model_name VARCHAR(255) NOT NULL,
+    trigger_type VARCHAR(50) NOT NULL,
+    condition JSONB NOT NULL,
+    cooldown_hours INT DEFAULT 24,
+    is_active BOOLEAN DEFAULT TRUE,
+    last_fired_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Indexes
+CREATE INDEX idx_feature_definitions_entity ON ml.feature_definitions(entity_type);
+CREATE INDEX idx_feature_definitions_name ON ml.feature_definitions(name);
+CREATE INDEX idx_model_versions_model ON ml.model_versions(model_name);
+CREATE INDEX idx_model_versions_stage ON ml.model_versions(stage);
+CREATE INDEX idx_training_jobs_status ON ml.training_jobs(status);
+CREATE INDEX idx_training_jobs_model ON ml.training_jobs(model_name);
+CREATE INDEX idx_ab_tests_status ON ml.ab_tests(status);
+CREATE INDEX idx_retraining_triggers_model ON ml.retraining_triggers(model_name);
+
 -- ── Report ──
 DO $$
 BEGIN
@@ -1019,9 +1126,11 @@ BEGIN
     RAISE NOTICE '  drivers, trips, vehicles, dispatch,';
     RAISE NOTICE '  pricing, payments, comms, marketplace,';
     RAISE NOTICE '  analytics';
+    RAISE NOTICE '  ml';
     RAISE NOTICE 'Phase 1 Tables: 17';
     RAISE NOTICE 'Phase 2 Tables: 30+';
     RAISE NOTICE 'Phase 3 Tables: 7';
+    RAISE NOTICE 'Phase 4 Tables: 7';
     RAISE NOTICE 'Roles: rider, driver, admin, support';
     RAISE NOTICE 'Admin: admin@mobility.dev';
     RAISE NOTICE '========================================';

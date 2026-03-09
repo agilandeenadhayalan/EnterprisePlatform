@@ -1,0 +1,409 @@
+# ==============================================
+# Smart Mobility & Analytics Platform
+# Phase 4: ML Platform Overlay
+# ==============================================
+#
+# Usage:
+#   docker-compose -f docker-compose.yml -f docker-compose.phase2.yml -f docker-compose.phase3.yml -f docker-compose.phase4.yml up -d
+#
+# This overlay adds:
+#   - MLflow (experiment tracking & model registry)
+#   - MLflow artifact buckets (via MinIO)
+#   - 20 Phase 4 ML platform microservices
+#
+# ==============================================
+
+# ── Shared config for Phase 4 Python services ──
+x-phase4-python-service: &phase4-python-service
+  restart: unless-stopped
+  environment: &phase4-python-env
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: 5432
+    POSTGRES_DB: mobility_platform
+    POSTGRES_USER: mobility
+    POSTGRES_PASSWORD: mobility_dev_2024
+    REDIS_HOST: redis
+    REDIS_PORT: 6379
+    JWT_SECRET_KEY: dev-secret-key-change-in-production
+    JWT_ALGORITHM: HS256
+    KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    SCHEMA_REGISTRY_URL: http://schema-registry:8081
+    # Phase 3: ClickHouse
+    CLICKHOUSE_HOST: clickhouse
+    CLICKHOUSE_PORT: 8123
+    CLICKHOUSE_NATIVE_PORT: 9000
+    CLICKHOUSE_DB: mobility_analytics
+    CLICKHOUSE_USER: default
+    CLICKHOUSE_PASSWORD: ""
+    # Phase 3: MinIO
+    MINIO_ENDPOINT: minio:9000
+    MINIO_ACCESS_KEY: minioadmin
+    MINIO_SECRET_KEY: minioadmin
+    # Phase 4: MLflow
+    MLFLOW_TRACKING_URI: http://mlflow:5000
+    MLFLOW_ARTIFACT_ROOT: s3://mlflow-artifacts
+    AWS_ACCESS_KEY_ID: minioadmin
+    AWS_SECRET_ACCESS_KEY: minioadmin
+    MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  deploy:
+    resources:
+      limits:
+        memory: 256M
+
+services:
+
+  # ══════════════════════════════════════════════
+  # Infrastructure
+  # ══════════════════════════════════════════════
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.14.0
+    container_name: mobility-mlflow
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri postgresql://mobility:mobility_dev_2024@postgres:5432/mlflow
+      --default-artifact-root s3://mlflow-artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  minio-init-mlflow:
+    image: minio/mc:latest
+    container_name: mobility-minio-init-mlflow
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin;
+      mc mb --ignore-existing local/mlflow-artifacts;
+      mc mb --ignore-existing local/ml-features;
+      mc mb --ignore-existing local/ml-predictions;
+      exit 0;
+      "
+
+  # ══════════════════════════════════════════════
+  # ML Feature Domain (5 services)
+  # ══════════════════════════════════════════════
+
+  feature-store:
+    <<: *phase4-python-service
+    build:
+      context: ./services/feature-store
+      dockerfile: Dockerfile
+    ports:
+      - "8150:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  feature-pipeline-driver:
+    <<: *phase4-python-service
+    build:
+      context: ./services/feature-pipeline-driver
+      dockerfile: Dockerfile
+    ports:
+      - "8151:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  feature-pipeline-weather:
+    <<: *phase4-python-service
+    build:
+      context: ./services/feature-pipeline-weather
+      dockerfile: Dockerfile
+    ports:
+      - "8152:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  feature-pipeline-zone:
+    <<: *phase4-python-service
+    build:
+      context: ./services/feature-pipeline-zone
+      dockerfile: Dockerfile
+    ports:
+      - "8153:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  feature-freshness-monitor:
+    <<: *phase4-python-service
+    build:
+      context: ./services/feature-freshness-monitor
+      dockerfile: Dockerfile
+    ports:
+      - "8154:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ══════════════════════════════════════════════
+  # ML Training Domain (5 services)
+  # ══════════════════════════════════════════════
+
+  ml-training-service:
+    <<: *phase4-python-service
+    build:
+      context: ./services/ml-training-service
+      dockerfile: Dockerfile
+    ports:
+      - "8160:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  training-data-service:
+    <<: *phase4-python-service
+    build:
+      context: ./services/training-data-service
+      dockerfile: Dockerfile
+    ports:
+      - "8161:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  hyperparameter-tuner:
+    <<: *phase4-python-service
+    build:
+      context: ./services/hyperparameter-tuner
+      dockerfile: Dockerfile
+    ports:
+      - "8162:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  experiment-tracker:
+    <<: *phase4-python-service
+    build:
+      context: ./services/experiment-tracker
+      dockerfile: Dockerfile
+    ports:
+      - "8163:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  retraining-trigger-service:
+    <<: *phase4-python-service
+    build:
+      context: ./services/retraining-trigger-service
+      dockerfile: Dockerfile
+    ports:
+      - "8164:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ══════════════════════════════════════════════
+  # ML Serving Domain (5 services)
+  # ══════════════════════════════════════════════
+
+  prediction-service:
+    <<: *phase4-python-service
+    build:
+      context: ./services/prediction-service
+      dockerfile: Dockerfile
+    ports:
+      - "8170:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  batch-prediction-service:
+    <<: *phase4-python-service
+    build:
+      context: ./services/batch-prediction-service
+      dockerfile: Dockerfile
+    ports:
+      - "8171:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  model-evaluation-service:
+    <<: *phase4-python-service
+    build:
+      context: ./services/model-evaluation-service
+      dockerfile: Dockerfile
+    ports:
+      - "8172:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  model-ab-test-service:
+    <<: *phase4-python-service
+    build:
+      context: ./services/model-ab-test-service
+      dockerfile: Dockerfile
+    ports:
+      - "8173:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  model-registry-service:
+    <<: *phase4-python-service
+    build:
+      context: ./services/model-registry-service
+      dockerfile: Dockerfile
+    ports:
+      - "8174:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ══════════════════════════════════════════════
+  # ML Monitoring Domain (5 services)
+  # ══════════════════════════════════════════════
+
+  ml-monitoring-service:
+    <<: *phase4-python-service
+    build:
+      context: ./services/ml-monitoring-service
+      dockerfile: Dockerfile
+    ports:
+      - "8180:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  ground-truth-collector:
+    <<: *phase4-python-service
+    build:
+      context: ./services/ground-truth-collector
+      dockerfile: Dockerfile
+    ports:
+      - "8181:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  prediction-logger:
+    <<: *phase4-python-service
+    build:
+      context: ./services/prediction-logger
+      dockerfile: Dockerfile
+    ports:
+      - "8182:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  recommendation-service:
+    <<: *phase4-python-service
+    build:
+      context: ./services/recommendation-service
+      dockerfile: Dockerfile
+    ports:
+      - "8183:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  embedding-service:
+    <<: *phase4-python-service
+    build:
+      context: ./services/embedding-service
+      dockerfile: Dockerfile
+    ports:
+      - "8184:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s

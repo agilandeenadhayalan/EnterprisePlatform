@@ -297,3 +297,77 @@ FROM (
     SELECT toDate('2009-01-01') + number AS d
     FROM numbers(6575)   -- ~18 years of dates
 );
+
+-- ==============================================
+-- Phase 4: ML Platform Tables
+-- ==============================================
+
+-- Feature values (offline feature store)
+-- WHY ReplacingMergeTree: Features are recomputed periodically.
+-- Deduplicates by computed_at on merge, keeping only the latest value.
+CREATE TABLE IF NOT EXISTS mobility_analytics.ml_feature_values (
+    entity_type     LowCardinality(String),
+    entity_id       String,
+    feature_name    LowCardinality(String),
+    feature_value   Float64,
+    computed_at     DateTime,
+    ingested_at     DateTime DEFAULT now()
+) ENGINE = ReplacingMergeTree(computed_at)
+PARTITION BY toYYYYMM(computed_at)
+ORDER BY (entity_type, entity_id, feature_name, computed_at);
+
+-- Prediction log (append-only)
+CREATE TABLE IF NOT EXISTS mobility_analytics.ml_prediction_log (
+    prediction_id   String,
+    model_name      LowCardinality(String),
+    model_version   UInt32,
+    features        String,                    -- JSON-encoded feature map
+    prediction      Float64,
+    confidence      Float32,
+    latency_ms      Float32,
+    request_source  LowCardinality(String),
+    predicted_at    DateTime,
+    ingested_at     DateTime DEFAULT now()
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(predicted_at)
+ORDER BY (model_name, predicted_at);
+
+-- Ground truth labels
+CREATE TABLE IF NOT EXISTS mobility_analytics.ml_ground_truth (
+    prediction_id   String,
+    model_name      LowCardinality(String),
+    actual_value    Float64,
+    label_delay_s   UInt32,
+    labeled_at      DateTime,
+    ingested_at     DateTime DEFAULT now()
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(labeled_at)
+ORDER BY (model_name, prediction_id);
+
+-- Drift detection results
+CREATE TABLE IF NOT EXISTS mobility_analytics.ml_drift_results (
+    feature_name    LowCardinality(String),
+    drift_type      LowCardinality(String),
+    metric_name     LowCardinality(String),
+    metric_value    Float64,
+    threshold       Float64,
+    is_drifted      UInt8,
+    detected_at     DateTime,
+    ingested_at     DateTime DEFAULT now()
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(detected_at)
+ORDER BY (feature_name, detected_at);
+
+-- Materialized view: prediction volume per model per hour
+CREATE MATERIALIZED VIEW IF NOT EXISTS mobility_analytics.mv_prediction_volume_hourly
+ENGINE = SummingMergeTree()
+PARTITION BY toYYYYMM(hour)
+ORDER BY (model_name, hour)
+AS SELECT
+    toStartOfHour(predicted_at)  AS hour,
+    model_name,
+    count()                      AS prediction_count,
+    avg(latency_ms)              AS avg_latency_ms,
+    avg(confidence)              AS avg_confidence
+FROM mobility_analytics.ml_prediction_log
+GROUP BY hour, model_name;
