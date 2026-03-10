@@ -1,0 +1,13 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bandit-service"
+version = "0.1.0"
+description = "Multi-armed bandit experiment management with epsilon-greedy, UCB1, and Thompson sampling"
+requires-python = ">=3.11"
+dependencies = ["mobility-common"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]

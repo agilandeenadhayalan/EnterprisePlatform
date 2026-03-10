@@ -1,0 +1,346 @@
+# ==============================================
+# Smart Mobility & Analytics Platform
+# Phase 6: Advanced AI Overlay
+# ==============================================
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.phase2.yml -f docker-compose.phase3.yml -f docker-compose.phase4.yml -f docker-compose.phase5.yml -f docker-compose.phase6.yml up -d
+#
+# This overlay adds:
+#   - Elasticsearch (search & analytics engine)
+#   - 14 Phase 6 Advanced AI microservices
+#
+# ==============================================
+
+# -- Shared config for Phase 6 Python services --
+x-phase6-python-service: &phase6-python-service
+  restart: unless-stopped
+  environment: &phase6-python-env
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: 5432
+    POSTGRES_DB: mobility_platform
+    POSTGRES_USER: mobility
+    POSTGRES_PASSWORD: mobility_dev_2024
+    REDIS_HOST: redis
+    REDIS_PORT: 6379
+    JWT_SECRET_KEY: dev-secret-key-change-in-production
+    JWT_ALGORITHM: HS256
+    KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    SCHEMA_REGISTRY_URL: http://schema-registry:8081
+    CLICKHOUSE_HOST: clickhouse
+    CLICKHOUSE_PORT: 8123
+    CLICKHOUSE_NATIVE_PORT: 9000
+    CLICKHOUSE_DB: mobility_analytics
+    CLICKHOUSE_USER: default
+    CLICKHOUSE_PASSWORD: ""
+    MINIO_ENDPOINT: minio:9000
+    MINIO_ACCESS_KEY: minioadmin
+    MINIO_SECRET_KEY: minioadmin
+    MLFLOW_TRACKING_URI: http://mlflow:5000
+    MLFLOW_ARTIFACT_ROOT: s3://mlflow-artifacts
+    AWS_ACCESS_KEY_ID: minioadmin
+    AWS_SECRET_ACCESS_KEY: minioadmin
+    MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+    PROMETHEUS_URL: http://prometheus:9090
+    GRAFANA_URL: http://grafana:3333
+    JAEGER_URL: http://jaeger:16686
+    ELASTICSEARCH_URL: http://elasticsearch:9200
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  deploy:
+    resources:
+      limits:
+        memory: 256M
+
+services:
+
+  # ══════════════════════════════════════════════
+  # Infrastructure
+  # ══════════════════════════════════════════════
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+    container_name: mobility-elasticsearch
+    restart: unless-stopped
+    ports:
+      - "9200:9200"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms256m -Xmx256m"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ══════════════════════════════════════════════
+  # AI / ML Domain (6 services)
+  # ══════════════════════════════════════════════
+
+  eta-prediction-service:
+    <<: *phase6-python-service
+    build:
+      context: ./services/eta-prediction-service
+      dockerfile: Dockerfile
+    container_name: mobility-eta-prediction-service
+    working_dir: /app/services/eta-prediction-service/src
+    ports:
+      - "8200:8000"
+    depends_on:
+      - elasticsearch
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  demand-forecast-service:
+    <<: *phase6-python-service
+    build:
+      context: ./services/demand-forecast-service
+      dockerfile: Dockerfile
+    container_name: mobility-demand-forecast-service
+    working_dir: /app/services/demand-forecast-service/src
+    ports:
+      - "8201:8000"
+    depends_on:
+      - elasticsearch
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  fraud-detection-service:
+    <<: *phase6-python-service
+    build:
+      context: ./services/fraud-detection-service
+      dockerfile: Dockerfile
+    container_name: mobility-fraud-detection-service
+    working_dir: /app/services/fraud-detection-service/src
+    ports:
+      - "8202:8000"
+    depends_on:
+      - elasticsearch
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  chatbot-service:
+    <<: *phase6-python-service
+    build:
+      context: ./services/chatbot-service
+      dockerfile: Dockerfile
+    container_name: mobility-chatbot-service
+    working_dir: /app/services/chatbot-service/src
+    ports:
+      - "8203:8000"
+    depends_on:
+      - elasticsearch
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  sentiment-analysis-service:
+    <<: *phase6-python-service
+    build:
+      context: ./services/sentiment-analysis-service
+      dockerfile: Dockerfile
+    container_name: mobility-sentiment-analysis-service
+    working_dir: /app/services/sentiment-analysis-service/src
+    ports:
+      - "8204:8000"
+    depends_on:
+      - elasticsearch
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  demand-simulator:
+    <<: *phase6-python-service
+    build:
+      context: ./services/demand-simulator
+      dockerfile: Dockerfile
+    container_name: mobility-demand-simulator
+    working_dir: /app/services/demand-simulator/src
+    ports:
+      - "8205:8000"
+    depends_on:
+      - elasticsearch
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ══════════════════════════════════════════════
+  # Experimentation Domain (5 services)
+  # ══════════════════════════════════════════════
+
+  experiment-analytics-service:
+    <<: *phase6-python-service
+    build:
+      context: ./services/experiment-analytics-service
+      dockerfile: Dockerfile
+    container_name: mobility-experiment-analytics-service
+    working_dir: /app/services/experiment-analytics-service/src
+    ports:
+      - "8206:8000"
+    depends_on:
+      - elasticsearch
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  experiment-service:
+    <<: *phase6-python-service
+    build:
+      context: ./services/experiment-service
+      dockerfile: Dockerfile
+    container_name: mobility-experiment-service
+    working_dir: /app/services/experiment-service/src
+    ports:
+      - "8207:8000"
+    depends_on:
+      - elasticsearch
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  bucketing-service:
+    <<: *phase6-python-service
+    build:
+      context: ./services/bucketing-service
+      dockerfile: Dockerfile
+    container_name: mobility-bucketing-service
+    working_dir: /app/services/bucketing-service/src
+    ports:
+      - "8208:8000"
+    depends_on:
+      - elasticsearch
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  bandit-service:
+    <<: *phase6-python-service
+    build:
+      context: ./services/bandit-service
+      dockerfile: Dockerfile
+    container_name: mobility-bandit-service
+    working_dir: /app/services/bandit-service/src
+    ports:
+      - "8209:8000"
+    depends_on:
+      - elasticsearch
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  ab-test-analytics-service:
+    <<: *phase6-python-service
+    build:
+      context: ./services/ab-test-analytics-service
+      dockerfile: Dockerfile
+    container_name: mobility-ab-test-analytics-service
+    working_dir: /app/services/ab-test-analytics-service/src
+    ports:
+      - "8210:8000"
+    depends_on:
+      - elasticsearch
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ══════════════════════════════════════════════
+  # Reinforcement Learning Domain (3 services)
+  # ══════════════════════════════════════════════
+
+  rl-dispatch-service:
+    <<: *phase6-python-service
+    build:
+      context: ./services/rl-dispatch-service
+      dockerfile: Dockerfile
+    container_name: mobility-rl-dispatch-service
+    working_dir: /app/services/rl-dispatch-service/src
+    ports:
+      - "8211:8000"
+    depends_on:
+      - elasticsearch
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  rl-model-serving:
+    <<: *phase6-python-service
+    build:
+      context: ./services/rl-model-serving
+      dockerfile: Dockerfile
+    container_name: mobility-rl-model-serving
+    working_dir: /app/services/rl-model-serving/src
+    ports:
+      - "8212:8000"
+    depends_on:
+      - elasticsearch
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  rl-training-env:
+    <<: *phase6-python-service
+    build:
+      context: ./services/rl-training-env
+      dockerfile: Dockerfile
+    container_name: mobility-rl-training-env
+    working_dir: /app/services/rl-training-env/src
+    ports:
+      - "8213:8000"
+    depends_on:
+      - elasticsearch
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s

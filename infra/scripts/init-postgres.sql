@@ -1253,6 +1253,170 @@ CREATE INDEX IF NOT EXISTS idx_slo_records_slo_id ON devops.slo_records(slo_id);
 CREATE INDEX IF NOT EXISTS idx_synthetic_results_monitor ON devops.synthetic_results(monitor_id);
 CREATE INDEX IF NOT EXISTS idx_chaos_runs_experiment ON devops.chaos_runs(experiment_id);
 
+-- ══════════════════════════════════════════════════════════════════════
+-- PHASE 6: AI PLATFORM SCHEMA
+-- A/B experimentation, fraud detection, reinforcement learning,
+-- demand forecasting, ETA prediction, and chatbot tables.
+-- ══════════════════════════════════════════════════════════════════════
+
+CREATE SCHEMA IF NOT EXISTS ai_platform;
+
+-- A/B Experiments
+CREATE TABLE IF NOT EXISTS ai_platform.experiments (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name                VARCHAR(255) NOT NULL,
+    description         TEXT,
+    experiment_type     VARCHAR(50) NOT NULL,
+    status              VARCHAR(50) NOT NULL DEFAULT 'draft',
+    variants            JSONB,
+    targeting_rules     JSONB,
+    traffic_percentage  DECIMAL(5,2) DEFAULT 100.0,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS ai_platform.experiment_assignments (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    experiment_id       UUID NOT NULL REFERENCES ai_platform.experiments(id),
+    user_id             VARCHAR(255) NOT NULL,
+    variant             VARCHAR(100) NOT NULL,
+    bucket_hash         VARCHAR(64),
+    assigned_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS ai_platform.experiment_results (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    experiment_id       UUID NOT NULL REFERENCES ai_platform.experiments(id),
+    metric_name         VARCHAR(255) NOT NULL,
+    control_value       DECIMAL(15,6),
+    variant_value       DECIMAL(15,6),
+    p_value             DECIMAL(10,8),
+    significant         BOOLEAN DEFAULT FALSE,
+    sample_size         INTEGER,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Fraud Detection
+CREATE TABLE IF NOT EXISTS ai_platform.fraud_alerts (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    transaction_id      VARCHAR(255) NOT NULL,
+    user_id             VARCHAR(255) NOT NULL,
+    risk_score          DECIMAL(5,4) NOT NULL,
+    alert_type          VARCHAR(100) NOT NULL,
+    status              VARCHAR(50) NOT NULL DEFAULT 'open',
+    details             JSONB,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS ai_platform.fraud_rules (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name                VARCHAR(255) NOT NULL,
+    rule_type           VARCHAR(100) NOT NULL,
+    threshold           DECIMAL(10,4),
+    is_active           BOOLEAN DEFAULT TRUE,
+    config              JSONB,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Reinforcement Learning
+CREATE TABLE IF NOT EXISTS ai_platform.rl_episodes (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    env_name            VARCHAR(255) NOT NULL,
+    policy_id           VARCHAR(255) NOT NULL,
+    steps               INTEGER DEFAULT 0,
+    total_reward        DECIMAL(15,6) DEFAULT 0,
+    epsilon             DECIMAL(5,4),
+    status              VARCHAR(50) NOT NULL DEFAULT 'running',
+    started_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at        TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS ai_platform.rl_models (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name                VARCHAR(255) NOT NULL,
+    version             VARCHAR(50) NOT NULL,
+    algorithm           VARCHAR(100) NOT NULL,
+    status              VARCHAR(50) NOT NULL DEFAULT 'staging',
+    metrics             JSONB,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS ai_platform.rl_actions (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    episode_id          UUID NOT NULL REFERENCES ai_platform.rl_episodes(id),
+    state               JSONB NOT NULL,
+    action              VARCHAR(100) NOT NULL,
+    reward              DECIMAL(15,6),
+    next_state          JSONB,
+    done                BOOLEAN DEFAULT FALSE,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Demand Forecasting
+CREATE TABLE IF NOT EXISTS ai_platform.demand_forecasts (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    zone_id             VARCHAR(100) NOT NULL,
+    time_slot           TIMESTAMPTZ NOT NULL,
+    predicted_demand    DECIMAL(10,2),
+    actual_demand       DECIMAL(10,2),
+    uncertainty_low     DECIMAL(10,2),
+    uncertainty_high    DECIMAL(10,2),
+    method              VARCHAR(100),
+    weather_factor      DECIMAL(5,4) DEFAULT 1.0,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ETA Prediction
+CREATE TABLE IF NOT EXISTS ai_platform.eta_predictions (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    route_id            VARCHAR(255) NOT NULL,
+    origin              JSONB NOT NULL,
+    destination         JSONB NOT NULL,
+    predicted_minutes   DECIMAL(10,2),
+    actual_minutes      DECIMAL(10,2),
+    confidence          DECIMAL(5,4),
+    method              VARCHAR(100),
+    features            JSONB,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Chatbot
+CREATE TABLE IF NOT EXISTS ai_platform.chatbot_conversations (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id             VARCHAR(255) NOT NULL,
+    messages            JSONB DEFAULT '[]',
+    status              VARCHAR(50) NOT NULL DEFAULT 'active',
+    started_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ended_at            TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS ai_platform.chatbot_intents (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name                VARCHAR(255) UNIQUE NOT NULL,
+    patterns            JSONB,
+    responses           JSONB,
+    priority            INTEGER DEFAULT 0,
+    is_active           BOOLEAN DEFAULT TRUE,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Indexes for Phase 6
+CREATE INDEX IF NOT EXISTS idx_experiments_status ON ai_platform.experiments(status);
+CREATE INDEX IF NOT EXISTS idx_experiment_assignments_experiment ON ai_platform.experiment_assignments(experiment_id);
+CREATE INDEX IF NOT EXISTS idx_experiment_assignments_user ON ai_platform.experiment_assignments(user_id);
+CREATE INDEX IF NOT EXISTS idx_experiment_results_experiment ON ai_platform.experiment_results(experiment_id);
+CREATE INDEX IF NOT EXISTS idx_fraud_alerts_transaction ON ai_platform.fraud_alerts(transaction_id);
+CREATE INDEX IF NOT EXISTS idx_fraud_alerts_user ON ai_platform.fraud_alerts(user_id);
+CREATE INDEX IF NOT EXISTS idx_fraud_alerts_status ON ai_platform.fraud_alerts(status);
+CREATE INDEX IF NOT EXISTS idx_rl_episodes_policy ON ai_platform.rl_episodes(policy_id);
+CREATE INDEX IF NOT EXISTS idx_rl_episodes_status ON ai_platform.rl_episodes(status);
+CREATE INDEX IF NOT EXISTS idx_rl_actions_episode ON ai_platform.rl_actions(episode_id);
+CREATE INDEX IF NOT EXISTS idx_demand_forecasts_zone ON ai_platform.demand_forecasts(zone_id);
+CREATE INDEX IF NOT EXISTS idx_eta_predictions_route ON ai_platform.eta_predictions(route_id);
+CREATE INDEX IF NOT EXISTS idx_chatbot_conversations_user ON ai_platform.chatbot_conversations(user_id);
+CREATE INDEX IF NOT EXISTS idx_chatbot_conversations_status ON ai_platform.chatbot_conversations(status);
+
 -- ── Report ──
 DO $$
 BEGIN
@@ -1261,12 +1425,13 @@ BEGIN
     RAISE NOTICE 'Schemas: identity, users, platform,';
     RAISE NOTICE '  drivers, trips, vehicles, dispatch,';
     RAISE NOTICE '  pricing, payments, comms, marketplace,';
-    RAISE NOTICE '  analytics, ml, devops';
+    RAISE NOTICE '  analytics, ml, devops, ai_platform';
     RAISE NOTICE 'Phase 1 Tables: 17';
     RAISE NOTICE 'Phase 2 Tables: 30+';
     RAISE NOTICE 'Phase 3 Tables: 7';
     RAISE NOTICE 'Phase 4 Tables: 7';
     RAISE NOTICE 'Phase 5 Tables: 11 (devops schema)';
+    RAISE NOTICE 'Phase 6 Tables: 12 (ai_platform schema)';
     RAISE NOTICE 'Roles: rider, driver, admin, support';
     RAISE NOTICE 'Admin: admin@mobility.dev';
     RAISE NOTICE '========================================';
