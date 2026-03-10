@@ -1,0 +1,13 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "region-router-service"
+version = "0.1.0"
+description = "Geo-routing, latency-based routing, and region mapping"
+requires-python = ">=3.11"
+dependencies = ["mobility-common"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]

@@ -1,0 +1,13 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "failover-manager-service"
+version = "0.1.0"
+description = "Health monitoring, failover triggers, and region promotion"
+requires-python = ">=3.11"
+dependencies = ["mobility-common"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]

@@ -1,0 +1,13 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "incident-service"
+version = "0.1.0"
+description = "Incident lifecycle management"
+requires-python = ">=3.11"
+dependencies = ["mobility-common"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]

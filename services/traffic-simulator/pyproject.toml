@@ -1,0 +1,13 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "traffic-simulator"
+version = "0.1.0"
+description = "Traffic patterns and congestion modeling"
+requires-python = ">=3.11"
+dependencies = ["mobility-common"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]

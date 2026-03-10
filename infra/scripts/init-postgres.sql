@@ -1417,6 +1417,207 @@ CREATE INDEX IF NOT EXISTS idx_eta_predictions_route ON ai_platform.eta_predicti
 CREATE INDEX IF NOT EXISTS idx_chatbot_conversations_user ON ai_platform.chatbot_conversations(user_id);
 CREATE INDEX IF NOT EXISTS idx_chatbot_conversations_status ON ai_platform.chatbot_conversations(status);
 
+-- ══════════════════════════════════════════════════════════════════════
+-- PHASE 7: GLOBAL SCALE SCHEMA
+-- Multi-region infrastructure, compliance & governance, safety,
+-- load testing, simulation, and cost management tables.
+-- ══════════════════════════════════════════════════════════════════════
+
+CREATE SCHEMA IF NOT EXISTS global_scale;
+
+-- Multi-region: region registry
+CREATE TABLE IF NOT EXISTS global_scale.regions (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name            VARCHAR(100) NOT NULL,
+    code            VARCHAR(10) UNIQUE NOT NULL,
+    endpoint        VARCHAR(255),
+    status          VARCHAR(20) DEFAULT 'active',
+    is_primary      BOOLEAN DEFAULT false,
+    latitude        FLOAT,
+    longitude       FLOAT,
+    metadata        JSONB DEFAULT '{}',
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Multi-region: failover event log
+CREATE TABLE IF NOT EXISTS global_scale.failover_events (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_region_id UUID,
+    target_region_id UUID,
+    trigger_type    VARCHAR(30) NOT NULL,
+    trigger_reason  TEXT,
+    status          VARCHAR(20) DEFAULT 'initiated',
+    started_at      TIMESTAMPTZ DEFAULT NOW(),
+    completed_at    TIMESTAMPTZ,
+    details         JSONB DEFAULT '{}'
+);
+
+-- Compliance: audit log
+CREATE TABLE IF NOT EXISTS global_scale.audit_logs (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    action          VARCHAR(50) NOT NULL,
+    entity_type     VARCHAR(50) NOT NULL,
+    entity_id       VARCHAR(100),
+    actor           VARCHAR(100) NOT NULL,
+    details         JSONB DEFAULT '{}',
+    region          VARCHAR(20),
+    ip_address      VARCHAR(45),
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Compliance: generated reports
+CREATE TABLE IF NOT EXISTS global_scale.compliance_reports (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    report_type     VARCHAR(50) NOT NULL,
+    framework       VARCHAR(30) NOT NULL,
+    status          VARCHAR(20) DEFAULT 'draft',
+    generated_by    VARCHAR(100),
+    findings        JSONB DEFAULT '[]',
+    score           FLOAT,
+    period_start    DATE,
+    period_end      DATE,
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Compliance: GDPR data-subject requests
+CREATE TABLE IF NOT EXISTS global_scale.gdpr_requests (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    request_type    VARCHAR(30) NOT NULL,
+    subject_email   VARCHAR(255) NOT NULL,
+    status          VARCHAR(20) DEFAULT 'pending',
+    data_categories JSONB DEFAULT '[]',
+    submitted_at    TIMESTAMPTZ DEFAULT NOW(),
+    due_date        DATE,
+    completed_at    TIMESTAMPTZ,
+    processing_notes TEXT
+);
+
+-- Compliance: PII scan results
+CREATE TABLE IF NOT EXISTS global_scale.pii_scan_results (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    dataset_id      VARCHAR(100) NOT NULL,
+    scan_type       VARCHAR(30) DEFAULT 'full',
+    findings        JSONB DEFAULT '[]',
+    pii_types_found JSONB DEFAULT '[]',
+    risk_level      VARCHAR(20),
+    total_findings  INT DEFAULT 0,
+    scanned_at      TIMESTAMPTZ DEFAULT NOW(),
+    scanned_by      VARCHAR(100)
+);
+
+-- Safety: incident tracking
+CREATE TABLE IF NOT EXISTS global_scale.incidents (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    incident_type       VARCHAR(50) NOT NULL,
+    severity            VARCHAR(20) NOT NULL,
+    status              VARCHAR(20) DEFAULT 'reported',
+    reported_by         VARCHAR(100),
+    description         TEXT,
+    location            JSONB DEFAULT '{}',
+    investigation_notes JSONB DEFAULT '[]',
+    reported_at         TIMESTAMPTZ DEFAULT NOW(),
+    resolved_at         TIMESTAMPTZ,
+    resolution          TEXT
+);
+
+-- Safety: entity safety scores
+CREATE TABLE IF NOT EXISTS global_scale.safety_scores (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entity_type     VARCHAR(20) NOT NULL,
+    entity_id       VARCHAR(100) NOT NULL,
+    score           FLOAT NOT NULL,
+    factors         JSONB DEFAULT '{}',
+    calculated_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Load Testing: test run definitions
+CREATE TABLE IF NOT EXISTS global_scale.load_test_runs (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    scenario_name   VARCHAR(100) NOT NULL,
+    pattern         VARCHAR(30) NOT NULL,
+    target_rps      INT,
+    duration_seconds INT,
+    status          VARCHAR(20) DEFAULT 'pending',
+    started_at      TIMESTAMPTZ,
+    completed_at    TIMESTAMPTZ,
+    config          JSONB DEFAULT '{}'
+);
+
+-- Load Testing: latency & throughput results
+CREATE TABLE IF NOT EXISTS global_scale.load_test_results (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id          UUID REFERENCES global_scale.load_test_runs(id),
+    p50_ms          FLOAT,
+    p95_ms          FLOAT,
+    p99_ms          FLOAT,
+    error_rate      FLOAT,
+    total_requests  BIGINT,
+    throughput_rps  FLOAT,
+    recorded_at     TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Simulation: run metadata
+CREATE TABLE IF NOT EXISTS global_scale.simulation_runs (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    simulation_type VARCHAR(50) NOT NULL,
+    scenario        JSONB DEFAULT '{}',
+    status          VARCHAR(20) DEFAULT 'created',
+    num_agents      INT DEFAULT 0,
+    num_ticks       INT DEFAULT 0,
+    started_at      TIMESTAMPTZ,
+    completed_at    TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Simulation: individual agents
+CREATE TABLE IF NOT EXISTS global_scale.simulation_agents (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id          UUID REFERENCES global_scale.simulation_runs(id),
+    agent_type      VARCHAR(30) NOT NULL,
+    state           JSONB DEFAULT '{}',
+    position        JSONB DEFAULT '{}',
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Cost Management: allocation definitions
+CREATE TABLE IF NOT EXISTS global_scale.cost_allocations (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    service_name    VARCHAR(100) NOT NULL,
+    resource_type   VARCHAR(30) NOT NULL,
+    cost_per_unit   FLOAT NOT NULL,
+    unit            VARCHAR(30) NOT NULL,
+    tags            JSONB DEFAULT '{}',
+    period          DATE,
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Cost Management: individual cost records
+CREATE TABLE IF NOT EXISTS global_scale.cost_records (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    allocation_id   UUID REFERENCES global_scale.cost_allocations(id),
+    quantity        FLOAT NOT NULL,
+    total_cost      FLOAT NOT NULL,
+    trip_id         VARCHAR(100),
+    request_id      VARCHAR(100),
+    recorded_at     TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Indexes for Phase 7
+CREATE INDEX IF NOT EXISTS idx_regions_code ON global_scale.regions(code);
+CREATE INDEX IF NOT EXISTS idx_failover_events_status ON global_scale.failover_events(status);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON global_scale.audit_logs(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_compliance_reports_framework ON global_scale.compliance_reports(framework);
+CREATE INDEX IF NOT EXISTS idx_gdpr_requests_email ON global_scale.gdpr_requests(subject_email);
+CREATE INDEX IF NOT EXISTS idx_pii_scan_results_dataset ON global_scale.pii_scan_results(dataset_id);
+CREATE INDEX IF NOT EXISTS idx_incidents_severity_status ON global_scale.incidents(severity, status);
+CREATE INDEX IF NOT EXISTS idx_safety_scores_entity ON global_scale.safety_scores(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_load_test_runs_status ON global_scale.load_test_runs(status);
+CREATE INDEX IF NOT EXISTS idx_load_test_results_run ON global_scale.load_test_results(run_id);
+CREATE INDEX IF NOT EXISTS idx_simulation_runs_type ON global_scale.simulation_runs(simulation_type);
+CREATE INDEX IF NOT EXISTS idx_simulation_agents_run ON global_scale.simulation_agents(run_id);
+CREATE INDEX IF NOT EXISTS idx_cost_allocations_service ON global_scale.cost_allocations(service_name);
+CREATE INDEX IF NOT EXISTS idx_cost_records_allocation ON global_scale.cost_records(allocation_id);
+
 -- ── Report ──
 DO $$
 BEGIN
@@ -1425,13 +1626,15 @@ BEGIN
     RAISE NOTICE 'Schemas: identity, users, platform,';
     RAISE NOTICE '  drivers, trips, vehicles, dispatch,';
     RAISE NOTICE '  pricing, payments, comms, marketplace,';
-    RAISE NOTICE '  analytics, ml, devops, ai_platform';
+    RAISE NOTICE '  analytics, ml, devops, ai_platform,';
+    RAISE NOTICE '  global_scale';
     RAISE NOTICE 'Phase 1 Tables: 17';
     RAISE NOTICE 'Phase 2 Tables: 30+';
     RAISE NOTICE 'Phase 3 Tables: 7';
     RAISE NOTICE 'Phase 4 Tables: 7';
     RAISE NOTICE 'Phase 5 Tables: 11 (devops schema)';
     RAISE NOTICE 'Phase 6 Tables: 12 (ai_platform schema)';
+    RAISE NOTICE 'Phase 7 Tables: 14 (global_scale schema)';
     RAISE NOTICE 'Roles: rider, driver, admin, support';
     RAISE NOTICE 'Admin: admin@mobility.dev';
     RAISE NOTICE '========================================';
